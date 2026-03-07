@@ -7,11 +7,11 @@
 #define ENB 33
 
 /************* ULTRASONIC SENSORS *************/
-#define TRIG_L 19
-#define ECHO_L 17
+#define TRIG_L 18
+#define ECHO_L 16
 
-#define TRIG_F 18
-#define ECHO_F 16
+#define TRIG_F 19
+#define ECHO_F 17
 
 #define TRIG_R 23
 #define ECHO_R 22
