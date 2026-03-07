@@ -1,18 +1,20 @@
-/************* MOTOR PINS *************/
-#define IN1 25
-#define IN2 26
-#define IN3 27
-#define IN4 14
+/************* MOTOR DRIVER *************/
+#define IN1 14
+#define IN2 27
+#define IN3 26
+#define IN4 25
 #define ENA 32
 #define ENB 33
 
-/************* ULTRASONIC PINS *************/
-#define TRIG_L 18
-#define ECHO_L 34
-#define TRIG_F 19
-#define ECHO_F 35
+/************* ULTRASONIC SENSORS *************/
+#define TRIG_L 19
+#define ECHO_L 17
+
+#define TRIG_F 18
+#define ECHO_F 16
+
 #define TRIG_R 23
-#define ECHO_R 36
+#define ECHO_R 22
 
 /************* FLAME SENSORS *************/
 #define FLAME_L 39
