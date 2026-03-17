@@ -26,19 +26,20 @@ A WiFi-controlled **ESP32-based Fire Fighting Robot** capable of detecting fire,
 - Simple and lightweight HTTP interface with websocket
 
 ---
-
 ## 🧠 System Architecture
+
+```text
 [ Mobile Browser ]
-↓ HTTP
-ESP32 (WiFi AP)
-↓
-┌───────────────┐
-│ Control Logic │
-└───────────────┘
-↓ ↓ ↓
-Motors Sensors Pump
-↓
-Fire Detection
+        ↓ HTTP
+     ESP32 (WiFi AP)
+        ↓
+  ┌───────────────┐
+  │ Control Logic │
+  └───────────────┘
+   ↓       ↓       ↓
+Motors  Sensors   Pump
+         ↓
+     Fire Detection
 
 
 ---
@@ -106,21 +107,16 @@ Fire Detection
 | Pump   | 21       |
 
 ---
-
-## 📁 Project Structure
 ESP32-Fire-Robot/
 │
-├── FireRobot.ino # Main ESP32 code
+├── FireRobot.ino        # Main ESP32 code
 │
 ├── media/
-│ ├── FireFightingBotCircuit.png
-│ ├── FireFightingBot.jpeg
-│ ├── demo.gif
+│   ├── circuit_diagram.png
+│   ├── robot_image.jpg
+│   ├── demo.gif
 │
 └── README.md
-
-
-
 ---
 
 ## ⚙️ Setup Instructions
@@ -206,8 +202,6 @@ http://192.168.4.1
 ---
 
 ## 📸 Project Preview
-
-> Add your own images/videos here
 
 ### Robot
 
