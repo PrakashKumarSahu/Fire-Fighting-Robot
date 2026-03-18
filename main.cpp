@@ -27,7 +27,7 @@
 
 /************* WIFI *************/
 #include <WiFi.h>
-#include <Servo.h>
+#include <ESP32Servo.h>
 
 const char* ssid = "ESP32_FIREBOT";
 const char* password = "12345678";
