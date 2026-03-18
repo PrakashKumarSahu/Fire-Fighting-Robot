@@ -1,175 +1,252 @@
-/************* MOTOR DRIVER *************/
+#include <WiFi.h> 
+#include <WebSocketsServer.h>
+#include <WebServer.h>
+#include <ESP32Servo.h>
+
+/* ================== WIFI ================== */
+const char* ssid = "ESP32_FIREBOT";
+const char* password = "12345678";
+
+WebSocketsServer webSocket(81);
+WebServer server(80);
+
+/* ================== MOTOR ================== */
 #define IN1 14
 #define IN2 27
 #define IN3 26
 #define IN4 25
-#define ENA 32
-#define ENB 33
 
-/************* ULTRASONIC SENSORS *************/
-#define TRIG_L 18
-#define ECHO_L 16
+/* ================== ULTRASONIC ================== */
+#define TRIG_LEFT 18
+#define ECHO_LEFT 16
+#define TRIG_FRONT 19
+#define ECHO_FRONT 17
+#define TRIG_RIGHT 23
+#define ECHO_RIGHT 22
 
-#define TRIG_F 19
-#define ECHO_F 17
+/* ================== FLAME ================== */
+#define FLAME_LEFT 39
+#define FLAME_CENTER 36
+#define FLAME_RIGHT 34
 
-#define TRIG_R 23
-#define ECHO_R 22
-
-/************* FLAME SENSORS *************/
-#define FLAME_L 39
-#define FLAME_C 36
-#define FLAME_R 34
-
-/************* ACTUATORS *************/
+/* ================== OUTPUT ================== */
 #define SERVO_PIN 13
-#define PUMP 21
+#define PUMP_PIN 21
 
-/************* WIFI *************/
-#include <WiFi.h>
-#include <ESP32Servo.h>
+Servo nozzleServo;
 
-const char* ssid = "ESP32_FIREBOT";
-const char* password = "12345678";
-
-WiFiServer server(80);
-Servo fireServo;
-
+/* ================== STATES ================== */
 bool autoMode = false;
+bool manualPump = false;
+bool fireDetected = false;
 
-/************* MOTOR FUNCTIONS *************/
-void forward() {
-  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH);
+/* ================== UI PAGE ================== */
+const char webpage[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<title>🔥 FireBot</title>
+<style>
+body { text-align:center; font-family:sans-serif; background:#111; color:#fff; }
+button { width:90px; height:50px; margin:6px; font-size:16px; border-radius:10px; }
+h2 { color:orange; }
+#status { margin-top:10px; }
+</style>
+</head>
+<body>
+
+<h2>🔥 Fire Fighting Robot</h2>
+
+<button onclick="send('F')">Forward</button><br>
+<button onclick="send('L')">Left</button>
+<button onclick="send('S')">Stop</button>
+<button onclick="send('R')">Right</button><br>
+<button onclick="send('B')">Back</button><br><br>
+
+<button onclick="send('AUTO')">AUTO</button>
+<button onclick="send('MANUAL')">MANUAL</button><br><br>
+
+<button onclick="send('P_ON')">Pump ON</button>
+<button onclick="send('P_OFF')">Pump OFF</button><br><br>
+
+<button onclick="send('SL')">Left Spray</button>
+<button onclick="send('SC')">Center</button>
+<button onclick="send('SR')">Right Spray</button>
+
+<p id="status">Status: Disconnected</p>
+
+<script>
+let ws;
+function connectWS(){
+    ws = new WebSocket("ws://" + location.hostname + ":81/");
+    ws.onopen = () => { document.getElementById('status').innerHTML = 'Status: Connected'; }
+    ws.onclose = () => { 
+        document.getElementById('status').innerHTML = 'Status: Disconnected'; 
+        setTimeout(connectWS, 2000); // reconnect
+    }
 }
-void backward() {
-  digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+connectWS();
+
+function send(cmd){
+  if(ws && ws.readyState === WebSocket.OPEN){
+      ws.send(cmd);
+  }
 }
-void left() {
-  digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH);
-}
-void right() {
-  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
-  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
-}
-void stopMotors() {
-  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+</script>
+
+</body>
+</html>
+)rawliteral";
+
+/* ================== MOTOR ================== */
+void setMotor(int a,int b,int c,int d){
+  digitalWrite(IN1,a);
+  digitalWrite(IN2,b);
+  digitalWrite(IN3,c);
+  digitalWrite(IN4,d);
 }
 
-/************* ULTRASONIC FUNCTION *************/
-long readDistance(int trig, int echo) {
-  digitalWrite(trig, LOW); delayMicroseconds(2);
-  digitalWrite(trig, HIGH); delayMicroseconds(10);
-  digitalWrite(trig, LOW);
-  long duration = pulseIn(echo, HIGH, 30000);
-  return duration * 0.034 / 2;
+void forward(){ setMotor(1,0,0,1); }
+void backward(){ setMotor(0,1,1,0); }
+void left(){ setMotor(0,1,0,1); }
+void right(){ setMotor(1,0,1,0); }
+void stopRobot(){ setMotor(0,0,0,0); }
+
+/* ================== DISTANCE ================== */
+int getDistance(int trig,int echo){
+  digitalWrite(trig,LOW); delayMicroseconds(2);
+  digitalWrite(trig,HIGH); delayMicroseconds(10);
+  digitalWrite(trig,LOW);
+
+  long d = pulseIn(echo,HIGH,20000);
+  if(d==0) return 300;
+  return d*0.034/2;
 }
 
-/************* FIRE HANDLING *************/
-bool handleFire() {
-  int fL = digitalRead(FLAME_L);
-  int fC = digitalRead(FLAME_C);
-  int fR = digitalRead(FLAME_R);
+/* ================== FIRE ================== */
+bool detectFire(){
+  int L = digitalRead(FLAME_LEFT);
+  int C = digitalRead(FLAME_CENTER);
+  int R = digitalRead(FLAME_RIGHT);
 
-  if (fL == LOW || fC == LOW || fR == LOW) {
-    stopMotors();
-    digitalWrite(PUMP, HIGH);
+  if(L==LOW || C==LOW || R==LOW){
+    fireDetected = true;
+    stopRobot();
 
-    if (fL == LOW)      fireServo.write(140);
-    else if (fR == LOW) fireServo.write(40);
-    else                fireServo.write(90);
+    if(C==LOW) nozzleServo.write(90);
+    else if(L==LOW) nozzleServo.write(120);
+    else nozzleServo.write(60);
 
     return true;
   }
-  digitalWrite(PUMP, LOW);
+
+  fireDetected = false;
   return false;
 }
 
-/************* AUTO MODE LOGIC *************/
-void autoLogic() {
-  if (handleFire()) return;
+/* ================== AUTO ================== */
+void autoDrive(){
+  if(detectFire()) return;
 
-  long dL = readDistance(TRIG_L, ECHO_L);
-  long dF = readDistance(TRIG_F, ECHO_F);
-  long dR = readDistance(TRIG_R, ECHO_R);
+  int f = getDistance(TRIG_FRONT,ECHO_FRONT);
+  int l = getDistance(TRIG_LEFT,ECHO_LEFT);
+  int r = getDistance(TRIG_RIGHT,ECHO_RIGHT);
 
-  if (dF > 25) {
+  if(f > 25){
     forward();
-  } 
-  else if (dL > dR) {
-    left();
-  } 
-  else {
-    right();
+  } else {
+    stopRobot();
+    unsigned long startTime = millis();
+    while(millis() - startTime < 300){
+      webSocket.loop();
+      server.handleClient();
+    }
+
+    if(l > r) left();
+    else right();
+
+    startTime = millis();
+    while(millis() - startTime < 300){
+      webSocket.loop();
+      server.handleClient();
+    }
   }
 }
 
-/************* SETUP *************/
-void setup() {
+/* ================== WEBSOCKET ================== */
+void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length){
+  if(type != WStype_TEXT) return;
+
+  String cmd = String((char*)payload);
+
+  if(cmd=="AUTO") autoMode=true;
+  else if(cmd=="MANUAL") autoMode=false;
+
+  else if(cmd=="F") forward();
+  else if(cmd=="B") backward();
+  else if(cmd=="L") left();
+  else if(cmd=="R") right();
+  else if(cmd=="S") stopRobot();
+
+  else if(cmd=="P_ON") manualPump=true;
+  else if(cmd=="P_OFF") manualPump=false;
+
+  else if(cmd=="SL") nozzleServo.write(120);
+  else if(cmd=="SC") nozzleServo.write(90);
+  else if(cmd=="SR") nozzleServo.write(60);
+}
+
+/* ================== SETUP ================== */
+void setup(){
   Serial.begin(115200);
 
-  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
-  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
-  pinMode(ENA, OUTPUT); pinMode(ENB, OUTPUT);
+  pinMode(IN1,OUTPUT); pinMode(IN2,OUTPUT);
+  pinMode(IN3,OUTPUT); pinMode(IN4,OUTPUT);
+  stopRobot();
 
-  pinMode(TRIG_L, OUTPUT); pinMode(ECHO_L, INPUT);
-  pinMode(TRIG_F, OUTPUT); pinMode(ECHO_F, INPUT);
-  pinMode(TRIG_R, OUTPUT); pinMode(ECHO_R, INPUT);
+  pinMode(TRIG_LEFT,OUTPUT); pinMode(ECHO_LEFT,INPUT);
+  pinMode(TRIG_FRONT,OUTPUT); pinMode(ECHO_FRONT,INPUT);
+  pinMode(TRIG_RIGHT,OUTPUT); pinMode(ECHO_RIGHT,INPUT);
 
-  pinMode(FLAME_L, INPUT);
-  pinMode(FLAME_C, INPUT);
-  pinMode(FLAME_R, INPUT);
+  pinMode(FLAME_LEFT,INPUT);
+  pinMode(FLAME_CENTER,INPUT);
+  pinMode(FLAME_RIGHT,INPUT);
 
-  pinMode(PUMP, OUTPUT);
-  digitalWrite(PUMP, LOW);
+  pinMode(PUMP_PIN,OUTPUT);
+  digitalWrite(PUMP_PIN,LOW);
 
-  analogWrite(ENA, 200);
-  analogWrite(ENB, 200);
+  nozzleServo.attach(SERVO_PIN);
+  nozzleServo.write(90);
 
-  fireServo.attach(SERVO_PIN);
-  fireServo.write(90);
+  WiFi.softAP(ssid,password);
+  Serial.println(WiFi.softAPIP());
 
-  WiFi.softAP(ssid, password);
+  // Web UI
+  server.on("/", [](){
+    server.send_P(200,"text/html",webpage);
+  });
   server.begin();
 
-  Serial.print("ESP32 IP: ");
-  Serial.println(WiFi.softAPIP());
+  // WebSocket
+  webSocket.begin();
+  webSocket.onEvent(onWebSocketEvent);
 }
 
-/************* LOOP *************/
-void loop() {
+/* ================== LOOP ================== */
+void loop(){
+  webSocket.loop();
+  server.handleClient();
 
-  if (autoMode) autoLogic();
+  bool pumpState = fireDetected || manualPump;
+  digitalWrite(PUMP_PIN, pumpState);
 
-  WiFiClient client = server.available();
-  if (!client) return;
-
-  String req = client.readStringUntil('\r');
-  client.flush();
-
-  if (req.indexOf("/auto") != -1) autoMode = true;
-  if (req.indexOf("/manual") != -1) autoMode = false;
-
-  if (!autoMode) {
-    if (req.indexOf("/forward") != -1) forward();
-    else if (req.indexOf("/backward") != -1) backward();
-    else if (req.indexOf("/left") != -1) left();
-    else if (req.indexOf("/right") != -1) right();
-    else if (req.indexOf("/stop") != -1) stopMotors();
+  // 🚫 SAFETY: stop when pump ON
+  if(pumpState){
+    stopRobot();
+    return;
   }
 
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html\n");
-  client.println("<h2>ESP32 Fire Fighting Robot</h2>");
-  client.println("<a href='/auto'>AUTO MODE</a><br>");
-  client.println("<a href='/manual'>MANUAL MODE</a><br><br>");
-  client.println("<a href='/forward'>Forward</a><br>");
-  client.println("<a href='/left'>Left</a>");
-  client.println("<a href='/right'>Right</a><br>");
-  client.println("<a href='/backward'>Backward</a><br>");
-  client.println("<a href='/stop'>Stop</a>");
-  client.stop();
+  if(autoMode){
+    autoDrive();
+  }
 }
